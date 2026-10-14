@@ -130,6 +130,7 @@ export default function CodingRound({ sessionData }) {
   // ── Data ────────────────────────────────────────────────────────────────────
   const [loading, setLoading]           = useState(true)
   const [fetchError, setFetchError]     = useState(null)
+  const [loadAttempt, setLoadAttempt]   = useState(0)
   const [questions, setQuestions]       = useState([])
   const [languages, setLanguages]       = useState([])
 
@@ -179,6 +180,8 @@ export default function CodingRound({ sessionData }) {
 
   // ── Load questions + languages ───────────────────────────────────────────────
   useEffect(() => {
+    setLoading(true)
+    setFetchError(null)
     Promise.all([
       getCodingQuestions(sessionData.applicationId),
       getCompilerLanguages(),
@@ -189,7 +192,7 @@ export default function CodingRound({ sessionData }) {
       })
       .catch(err => setFetchError(err.message || 'Failed to load coding round.'))
       .finally(() => setLoading(false))
-  }, [sessionData.applicationId])
+  }, [sessionData.applicationId, loadAttempt])
 
   // ── Once the round starts: request fullscreen + start monitoring after 4s ────
   useEffect(() => {
@@ -579,8 +582,30 @@ export default function CodingRound({ sessionData }) {
     )
   }
 
+  // ── Load failed: the round still exists, so let the candidate retry ─────────
+  if (fetchError) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="bg-white rounded-2xl shadow-card-xl max-w-md w-full p-10 text-center animate-fade-up">
+          <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-5">
+            <AlertTriangle size={24} className="text-amber-600" />
+          </div>
+          <h2 className="text-xl font-extrabold text-slate-900 mb-2">Couldn't Load the Coding Round</h2>
+          <p className="text-slate-500 text-sm leading-relaxed mb-2">
+            Check your internet connection and try again. Your coding round is still open.
+          </p>
+          <p className="text-slate-400 text-xs mb-7">{fetchError}</p>
+          <button onClick={() => setLoadAttempt(n => n + 1)}
+            className="w-full py-3 rounded-xl bg-navy-800 hover:bg-navy-700 text-white font-semibold text-sm transition-all">
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // ── No coding round ──────────────────────────────────────────────────────────
-  if (fetchError || questions.length === 0) {
+  if (questions.length === 0) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
         <div className="bg-white rounded-2xl shadow-card-xl max-w-md w-full p-10 text-center animate-fade-up">

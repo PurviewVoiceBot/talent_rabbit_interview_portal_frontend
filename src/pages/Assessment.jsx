@@ -26,15 +26,20 @@ const PREVIEW_DYNAMIC_VARIABLE_KEYS = [
   'application_id', 'job_salary_range',
 ]
 
+// Job and candidate context comes from the validate response; the IDs are
+// always sent from the session. The agent rejects missing variables, so any
+// key the backend didn't supply still gets a value.
 const buildPreviewDynamicVariables = (sessionData) => {
+  const fromBackend = sessionData?.agentVariables || {}
   const actualValues = {
-    candidate_name: sessionData?.candidateName || 'a',
-    candidate_id: sessionData?.candidateId || 'a',
-    application_id: sessionData?.applicationId || 'a',
-    job_id: sessionData?.jobId || 'a',
+    ...fromBackend,
+    candidate_name: sessionData?.candidateName || fromBackend.candidate_name,
+    candidate_id: sessionData?.candidateId || fromBackend.candidate_id,
+    application_id: sessionData?.applicationId || fromBackend.application_id,
+    job_id: sessionData?.jobId || fromBackend.job_id,
   }
   return PREVIEW_DYNAMIC_VARIABLE_KEYS.reduce((acc, key) => {
-    acc[key] = actualValues[key] || 'a'
+    acc[key] = actualValues[key] || 'Not specified'
     return acc
   }, {})
 }
@@ -716,10 +721,10 @@ export default function Assessment({ sessionData }) {
   }
 
   // ── Session ended ─────────────────────────────────────────────────────────────
-  // A coding round follows only when the backend flagged `coding_enabled` at
-  // validation. Otherwise this is an interview-only (HR) round → go to completion.
+  // A coding round follows only when the job runs coding after the technical
+  // interview. Otherwise the assessment is complete.
   if (sessionEnded) {
-    const hasCoding = !!sessionData?.codingEnabled
+    const hasCoding = !!(sessionData?.hasCodingAfterTechnical ?? sessionData?.codingEnabled)
     return (
       <div className="min-h-screen bg-navy-950 flex items-center justify-center p-6">
         <div className="bg-white rounded-2xl shadow-card-xl max-w-md w-full p-10 text-center animate-fade-up">

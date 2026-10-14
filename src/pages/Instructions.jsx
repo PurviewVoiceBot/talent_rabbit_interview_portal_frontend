@@ -58,6 +58,14 @@ const INSTRUCTIONS = [
   },
 ]
 
+// Coding-only assessments have no AI conversation; this replaces the last tip.
+const CODING_TIP = {
+  icon: <CheckCheck size={18} />,
+  color: 'bg-green-50 text-green-600',
+  title: 'Run Before You Submit',
+  desc: 'You have 30 minutes for the coding questions. Run your code against the sample tests, then submit each answer.',
+}
+
 const PERMISSION_STATUS = { idle: 'idle', requesting: 'requesting', granted: 'granted', denied: 'denied' }
 
 // ── Network quality helpers ───────────────────────────────────────────────────
@@ -330,7 +338,7 @@ export default function Instructions({ sessionData, onStart }) {
     } catch { /* ignore - assessment page will retry */ }
     await new Promise(r => setTimeout(r, 400))
     onStart({ ...sessionData, started: true })
-    navigate('/assessment')
+    navigate(sessionData?.currentRound === 'coding' ? '/coding-round' : '/assessment')
   }
 
   const allChecksPass =
@@ -465,7 +473,7 @@ export default function Instructions({ sessionData, onStart }) {
             Interview Guidelines
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {INSTRUCTIONS.map((item, i) => (
+            {(sessionData?.currentRound === 'coding' ? [...INSTRUCTIONS.slice(0, -1), CODING_TIP] : INSTRUCTIONS).map((item, i) => (
               <div
                 key={i}
                 className="flex items-start gap-3.5 p-4 rounded-xl bg-white

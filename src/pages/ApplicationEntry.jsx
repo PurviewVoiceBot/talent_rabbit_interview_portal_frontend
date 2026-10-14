@@ -421,7 +421,11 @@ export default function ApplicationEntry({ onValidated }) {
       await uploadIdentity(trimmed, candidatePhoto.blob, idProofCapture.blob)
 
       const res = await validateApplication(trimmed)
-      const goToCoding = (res.round || '').startsWith('technical_coding')
+      // The backend opens the job's first portal round: the technical interview
+      // or, for coding-only jobs, the coding test (also when resuming one).
+      const currentRound = res.current_round
+        || ((res.round || '').startsWith('technical_coding') ? 'coding' : 'technical')
+      const hasCodingAfterTechnical = res.has_coding_after_technical ?? res.coding_enabled === true
 
       onValidated({
         applicationId:     res.application_id,
@@ -430,12 +434,17 @@ export default function ApplicationEntry({ onValidated }) {
         candidateName:     res.full_name,
         validated:         res.success,
         applicationStatus: res.round,
-        codingEnabled:     res.coding_enabled === true,
-        started:           goToCoding,
+        rounds:            res.rounds || [],
+        currentRound,
+        hasCodingAfterTechnical,
+        codingEnabled:     hasCodingAfterTechnical || currentRound === 'coding',
+        agentVariables:    res.agent_variables || {},
+        started:           false,
         idProofType,
       })
 
-      navigate(goToCoding ? '/coding-round' : '/instructions')
+      // Every round goes through the device and fullscreen checks first.
+      navigate('/instructions')
     } catch (err) {
       setError(err.message || 'Something went wrong. Please try again.')
     } finally {
