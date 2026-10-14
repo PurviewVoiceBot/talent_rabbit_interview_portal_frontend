@@ -1,5 +1,14 @@
 {
   "projects": {
-    "default": "purview-callohminterview"
+    "default": "talent-rabbit-db"
+  },
+  "targets": {
+    "talent-rabbit-db": {
+      "hosting": {
+        "portal": [
+          "talent-rabbit-interview"
+        ]
+      }
+    }
   }
 }

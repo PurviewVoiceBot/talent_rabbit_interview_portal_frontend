@@ -124,7 +124,6 @@ function CandidateView({ videoRef, cameraError, candidateName, isMain }) {
         playsInline
         muted
         className="w-full h-full object-cover"
-        style={{ transform: 'scaleX(-1)' }}
       />
       {/* Fallback when camera is unavailable */}
       {cameraError && (
@@ -196,7 +195,10 @@ export default function Assessment({ sessionData }) {
   const awayRef = useRef(false)
   const mediaRecorderRef = useRef(null)
   const recordingChunksRef = useRef([])
+  // Set only after the recording has been uploaded successfully.
   const uploadedRef = useRef(false)
+  const finalizePromiseRef = useRef(null)
+  const uploadPromiseRef = useRef(null)
 
   // ── Camera + recording setup ───────────────────────────────────────────────
   useEffect(() => {
@@ -245,28 +247,60 @@ export default function Assessment({ sessionData }) {
     } catch { /* recording unavailable - interview continues */ }
   }, [])
 
+  // Stops the recorder once (flushing the in-progress chunk) and resolves to
+  // the full recording, or null if nothing was recorded. Concurrent callers
+  // share one promise, so a second stop can't replace the first's onstop.
+  const finalizeRecording = useCallback(() => {
+    if (!finalizePromiseRef.current) {
+      finalizePromiseRef.current = (async () => {
+        const recorder = mediaRecorderRef.current
+        if (!recorder) return null
+        if (recorder.state !== 'inactive') {
+          await new Promise(resolve => {
+            recorder.onstop = resolve
+            if (recorder.state === 'recording') recorder.requestData()
+            recorder.stop()
+          })
+        }
+        const chunks = recordingChunksRef.current
+        if (chunks.length === 0) return null
+        return new Blob(chunks, { type: recorder.mimeType || 'video/webm' })
+      })()
+    }
+    return finalizePromiseRef.current
+  }, [])
+
+  // Uploads the recording at most once. Callers share an in-flight upload,
+  // and a failed upload can be retried because uploadedRef is only set on
+  // success. Rejects with the upload error.
+  const uploadRecordingOnce = useCallback((onProgress) => {
+    if (uploadedRef.current) return Promise.resolve()
+    if (!uploadPromiseRef.current) {
+      const appId = sessionData?.applicationId
+      uploadPromiseRef.current = (async () => {
+        try {
+          const blob = await finalizeRecording()
+          if (blob) {
+            if (onProgress) await uploadRecordingWithProgress(appId, blob, onProgress)
+            else await uploadRecording(appId, blob)
+          }
+          uploadedRef.current = true
+        } finally {
+          uploadPromiseRef.current = null
+        }
+      })()
+    }
+    return uploadPromiseRef.current
+  }, [finalizeRecording, sessionData?.applicationId])
+
   const stopAndUpload = useCallback(async () => {
-    if (uploadedRef.current) return
-    uploadedRef.current = true
-    const recorder = mediaRecorderRef.current
-    if (!recorder) return
     setIsUploading(true)
     try {
-      await new Promise((resolve) => {
-        if (recorder.state === 'inactive') { resolve(); return }
-        recorder.onstop = resolve
-        if (recorder.state === 'recording') recorder.requestData() // flush current chunk
-        recorder.stop()
-      })
-      const chunks = recordingChunksRef.current
-      if (chunks.length > 0) {
-        const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' })
-        await uploadRecording(sessionData?.applicationId, blob)
-      }
+      await uploadRecordingOnce()
     } catch { /* best effort */ } finally {
       setIsUploading(false)
     }
-  }, [sessionData?.applicationId])
+  }, [uploadRecordingOnce])
 
   // ── ElevenLabs voice conversation ──────────────────────────────────────────
   const voiceConv = useConversation({
@@ -391,24 +425,11 @@ export default function Assessment({ sessionData }) {
   }, [sessionEnded, terminated])
 
   useEffect(() => {
+    // Only warn. An upload can't be done reliably here: keepalive requests
+    // are capped at ~64 KB, and the candidate may still choose to stay.
     const h = (e) => {
       e.preventDefault()
       e.returnValue = 'Interview in progress.'
-      // Best-effort upload of whatever chunks we have at the time of unload
-      if (!uploadedRef.current && recordingChunksRef.current.length > 0) {
-        uploadedRef.current = true
-        const recorder = mediaRecorderRef.current
-        if (recorder && recorder.state !== 'inactive') recorder.requestData()
-        const blob = new Blob(recordingChunksRef.current, {
-          type: recorder?.mimeType || 'video/webm',
-        })
-        fetch(`${import.meta.env.VITE_BACKEND_URL || ''}/recruitment/recordings/${sessionData?.applicationId}`, {
-          method: 'POST',
-          headers: { 'accept': 'application/json', 'xi-api-key': import.meta.env.VITE_XI_API_KEY || '', 'ngrok-skip-browser-warning': 'true' },
-          body: (() => { const f = new FormData(); f.append('file', blob, `${sessionData?.applicationId}_recording.webm`); return f })(),
-          keepalive: true,
-        }).catch(() => { })
-      }
       return e.returnValue
     }
     window.addEventListener('beforeunload', h)
@@ -595,28 +616,9 @@ export default function Assessment({ sessionData }) {
   useEffect(() => {
     if (!sessionEnded) return
     stopPreviewSession()
-    // Upload in background - SPA keeps in-flight XHR alive through navigation
-    if (!uploadedRef.current && mediaRecorderRef.current) {
-      uploadedRef.current = true
-      const recorder = mediaRecorderRef.current
-      const appId    = sessionData?.applicationId
-      ;(async () => {
-        try {
-          if (recorder.state !== 'inactive') {
-            await new Promise(resolve => {
-              recorder.onstop = resolve
-              if (recorder.state === 'recording') recorder.requestData()
-              recorder.stop()
-            })
-          }
-          const chunks = recordingChunksRef.current
-          if (chunks.length > 0) {
-            const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' })
-            await uploadRecording(appId, blob)
-          }
-        } catch { /* best effort */ }
-      })()
-    }
+    // Upload in background - SPA keeps in-flight XHR alive through navigation.
+    // If it fails, the session-ended button retries it.
+    uploadRecordingOnce().catch(() => { })
   }, [sessionEnded]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -640,31 +642,14 @@ export default function Assessment({ sessionData }) {
       conv.endSession().catch(() => { })
     }
 
-    // Finalize recorder - flush in-progress chunk then stop
-    if (!uploadedRef.current && mediaRecorderRef.current) {
-      uploadedRef.current = true
-      const recorder = mediaRecorderRef.current
-      const appId = sessionData?.applicationId
-
-      if (recorder.state !== 'inactive') {
-        await new Promise(resolve => {
-          recorder.onstop = resolve
-          if (recorder.state === 'recording') recorder.requestData()
-          recorder.stop()
-        })
-      }
-
-      const chunks = recordingChunksRef.current
-      if (chunks.length > 0) {
-        const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' })
-        try {
-          await uploadRecordingWithProgress(appId, blob, setUploadProgress)
-          setUploadProgress(100)
-        } catch (err) {
-          setUploadError(err?.message || 'Upload failed. Please try again.')
-          return  // stay on page so user can retry
-        }
-      }
+    // Finalize the recorder and upload; on failure stay so the user can retry
+    // (the finalized recording is kept, so a retry re-sends the same file).
+    try {
+      await uploadRecordingOnce(setUploadProgress)
+      setUploadProgress(100)
+    } catch (err) {
+      setUploadError(err?.message || 'Upload failed. Please try again.')
+      return
     }
 
     // Upload done (or nothing to upload) - navigate
@@ -749,6 +734,8 @@ export default function Assessment({ sessionData }) {
           </p>
           <button
             onClick={() => {
+              // Retries the background upload if it failed (no-op once uploaded).
+              uploadRecordingOnce().catch(() => { })
               if (hasCoding) {
                 navigate('/coding-round')
               } else {
