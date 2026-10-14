@@ -296,7 +296,7 @@ function LiveCapture({
               autoPlay
               playsInline
               muted
-              className={`${aspectClass} w-full ${fitClass} ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+              className={`${aspectClass} w-full ${fitClass}`}
             />
             <div className="pointer-events-none absolute inset-4 rounded-xl border border-white/50" />
             {starting && (
