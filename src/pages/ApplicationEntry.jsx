@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
   AlertCircle,
@@ -361,14 +361,27 @@ function StepPanel({ step, title, icon: Icon, children }) {
 
 export default function ApplicationEntry({ onValidated }) {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [activeStep, setActiveStep] = useState(1)
-  const [appId, setAppId] = useState('')
+  // The invite email's link carries ?application_id=…, so the candidate
+  // doesn't have to copy it across by hand.
+  const [appId, setAppId] = useState(() => (searchParams.get('application_id') || '').trim())
   const [appIdCaptured, setAppIdCaptured] = useState(false)
   const [idProofType, setIdProofType] = useState('')
   const [candidatePhoto, setCandidatePhoto] = useState(null)
   const [idProofCapture, setIdProofCapture] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // Drop the ID from the address bar once it's in the form, so it isn't left
+  // in the browser history or shown on a shared screen.
+  useEffect(() => {
+    if (searchParams.has('application_id')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('application_id')
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   const appIdDone = appIdCaptured
   const idDone = Boolean(idProofType && idProofCapture)
