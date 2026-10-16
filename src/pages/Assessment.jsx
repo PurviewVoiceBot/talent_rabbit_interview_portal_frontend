@@ -14,6 +14,7 @@ import {
   uploadRecordingWithProgress,
   trackViolation,
   exitTechnicalInterview,
+  exitTechnicalInterviewOnPageExit,
 } from '../apis/apiService'
 
 // const MAX_VIOLATIONS = 3
@@ -205,6 +206,9 @@ export default function Assessment({ sessionData }) {
   const uploadedRef = useRef(false)
   const finalizePromiseRef = useRef(null)
   const uploadPromiseRef = useRef(null)
+  // Set once the exit has been reported, so End Session and closing the tab
+  // don't both send it.
+  const exitReportedRef = useRef(false)
 
   // ── Camera + recording setup ───────────────────────────────────────────────
   useEffect(() => {
@@ -442,6 +446,19 @@ export default function Assessment({ sessionData }) {
     return () => window.removeEventListener('beforeunload', h)
   }, [sessionData?.applicationId])
 
+  // Closing the tab, refreshing or navigating away ends the interview, so mark
+  // it incomplete. A 409 means the agent already submitted, and a later agent
+  // submit is still accepted from technical_incomplete.
+  useEffect(() => {
+    const h = () => {
+      if (exitReportedRef.current) return
+      exitReportedRef.current = true
+      exitTechnicalInterviewOnPageExit(sessionData?.applicationId)
+    }
+    window.addEventListener('pagehide', h)
+    return () => window.removeEventListener('pagehide', h)
+  }, [sessionData?.applicationId])
+
   useEffect(() => {
     const h = () => { if (document.hidden && monitoringActive && !terminated && !sessionEnded) raiseViolation('tab_switch', 'You switched away from this tab. Return to this window immediately - leaving this tab is a violation and may close your interview.') }
     document.addEventListener('visibilitychange', h)
@@ -651,9 +668,12 @@ export default function Assessment({ sessionData }) {
     // Mark the round incomplete. A 409 means the agent already submitted.
     // Not awaited: the SPA keeps the request alive through navigation, and
     // the post-call webhook covers it if this fails.
-    exitTechnicalInterview(sessionData?.applicationId).catch((err) => {
-      console.error('Failed to mark the interview incomplete:', err)
-    })
+    if (!exitReportedRef.current) {
+      exitReportedRef.current = true
+      exitTechnicalInterview(sessionData?.applicationId).catch((err) => {
+        console.error('Failed to mark the interview incomplete:', err)
+      })
+    }
 
     // Finalize the recorder and upload; on failure stay so the user can retry
     // (the finalized recording is kept, so a retry re-sends the same file).

@@ -191,6 +191,33 @@ export async function exitTechnicalInterview(applicationId) {
   })
 }
 
+// ── Page-unload beacons ───────────────────────────────────────────────────────
+
+/**
+ * POSTs to the backend while the page is closing (tab close, refresh,
+ * navigating away). sendBeacon can't set headers, so the client key goes in
+ * the query string. Best effort: the browser may still drop it.
+ *
+ * @param {string} path - backend path starting with '/'
+ */
+function sendPageExitBeacon(path) {
+  const url = `${BACKEND_URL}${path}?xi-api-key=${encodeURIComponent(XI_API_KEY)}`
+  try {
+    if (navigator.sendBeacon?.(url)) return
+  } catch { /* fall through */ }
+  fetch(url, { method: 'POST', keepalive: true, mode: 'no-cors' }).catch(() => { })
+}
+
+/** Page-unload version of exitTechnicalInterview. */
+export function exitTechnicalInterviewOnPageExit(applicationId) {
+  sendPageExitBeacon(`/recruitment/agents/technical/exit/${encodeURIComponent(applicationId)}`)
+}
+
+/** Page-unload version of collectCodingRound: finalizes the coding score. */
+export function collectCodingRoundOnPageExit(applicationId) {
+  sendPageExitBeacon(`/recruitment/agents/technical/coding/collect/${encodeURIComponent(applicationId)}`)
+}
+
 /**
  * Flags the application as Round 2 violated when the session is terminated.
  * POST /recruitment/agents/technical/violate/{applicationId}

@@ -6,7 +6,7 @@ import {
   Maximize2, Minimize2, ShieldX, MonitorX, Sun, Moon,
   LogOut, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
-import { getCodingQuestions, getCompilerLanguages, runCode, submitCode, reportCodingViolation, collectCodingRound,trackViolation } from '../apis/apiService'
+import { getCodingQuestions, getCompilerLanguages, runCode, submitCode, reportCodingViolation, collectCodingRound, collectCodingRoundOnPageExit, trackViolation } from '../apis/apiService'
 import CodeMirror from '@uiw/react-codemirror'
 import { vscodeDark, vscodeLight } from '@uiw/codemirror-theme-vscode'
 import { StreamLanguage } from '@codemirror/language'
@@ -126,6 +126,9 @@ export default function CodingRound({ sessionData }) {
   const lastViolationRef  = useRef({})   // per-type debounce
   const awayRef           = useRef(false) // one violation per absence
   const autoSubmittedRef  = useRef(false)
+  // Set once the round is finalized (End Round or timer succeeded) or the
+  // page-exit beacon has been sent, so leaving the page doesn't collect again.
+  const finalizedRef      = useRef(false)
 
   // ── Data ────────────────────────────────────────────────────────────────────
   const [loading, setLoading]           = useState(true)
@@ -225,12 +228,37 @@ export default function CodingRound({ sessionData }) {
     const finalizeOnTimeout = async () => {
       setAutoSubmitting(true)
       // Only the candidate's explicitly-submitted answers count. We just collect.
-      await collectCodingRound(sessionData?.applicationId).catch(() => {})
+      await collectCodingRound(sessionData?.applicationId)
+        .then(() => { finalizedRef.current = true })
+        .catch(() => {})
       sessionStorage.removeItem('interview_session')
       navigate('/session-complete')
     }
     finalizeOnTimeout()
   }, [timeLeft]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Leaving the page ends the round ──────────────────────────────────────────
+  // Closing the tab, refreshing or navigating away finalizes the score, the
+  // same as End Round, so warn first.
+  useEffect(() => {
+    const warn = (e) => {
+      if (finalizedRef.current) return
+      e.preventDefault()
+      e.returnValue = 'Leaving this page will end your coding round.'
+      return e.returnValue
+    }
+    const finalize = () => {
+      if (finalizedRef.current) return
+      finalizedRef.current = true
+      collectCodingRoundOnPageExit(sessionData?.applicationId)
+    }
+    window.addEventListener('beforeunload', warn)
+    window.addEventListener('pagehide', finalize)
+    return () => {
+      window.removeEventListener('beforeunload', warn)
+      window.removeEventListener('pagehide', finalize)
+    }
+  }, [sessionData?.applicationId])
 
   // ── Cleanup toast timer ──────────────────────────────────────────────────────
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }, [])
@@ -551,7 +579,9 @@ export default function CodingRound({ sessionData }) {
 
     // Only collect - we never auto-submit. Whatever the candidate explicitly
     // submitted is what counts.
-    await collectCodingRound(sessionData?.applicationId).catch(() => {})
+    await collectCodingRound(sessionData?.applicationId)
+      .then(() => { finalizedRef.current = true })
+      .catch(() => {})
     sessionStorage.removeItem('interview_session')
     navigate('/session-complete')
   }
