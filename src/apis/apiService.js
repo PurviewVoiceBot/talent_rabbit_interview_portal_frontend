@@ -179,16 +179,15 @@ export async function reportViolation(applicationId, violation) {
 }
 
 /**
- * Ends the interview session (manual exit or auto-termination).
+ * Marks the technical round incomplete when the candidate ends the interview
+ * before the agent submits. Returns 409 if the round has already moved on.
+ * POST /recruitment/agents/technical/exit/{applicationId}
  *
  * @param {string} applicationId
- * @param {'completed' | 'terminated' | 'exited'} reason
  */
-export async function endSession(applicationId, reason) {
-  return request(`${BACKEND_URL}/recruitment/agents/technical/session/end/${applicationId}`, {
+export async function exitTechnicalInterview(applicationId) {
+  return request(`${BACKEND_URL}/recruitment/agents/technical/exit/${encodeURIComponent(applicationId)}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason }),
   })
 }
 

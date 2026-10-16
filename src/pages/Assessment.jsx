@@ -13,6 +13,7 @@ import {
   uploadRecording,
   uploadRecordingWithProgress,
   trackViolation,
+  exitTechnicalInterview,
 } from '../apis/apiService'
 
 // const MAX_VIOLATIONS = 3
@@ -646,6 +647,13 @@ export default function Assessment({ sessionData }) {
       isStartingSessionRef.current = false
       conv.endSession().catch(() => { })
     }
+
+    // Mark the round incomplete. A 409 means the agent already submitted.
+    // Not awaited: the SPA keeps the request alive through navigation, and
+    // the post-call webhook covers it if this fails.
+    exitTechnicalInterview(sessionData?.applicationId).catch((err) => {
+      console.error('Failed to mark the interview incomplete:', err)
+    })
 
     // Finalize the recorder and upload; on failure stay so the user can retry
     // (the finalized recording is kept, so a retry re-sends the same file).
